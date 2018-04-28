@@ -137,6 +137,14 @@ public:
     bool post( const std::string &url, const std::string &content ) {
         auto result = false;
         httplib::Headers headers;
+        std::stringstream authHdrStream;
+        authHdrStream << "Digest username=\"" << m_userName << "\", realm=\""
+                      << m_realm << "\", nonce=\""
+                      << m_nonce << "\", uri=\""
+                      << URI << "\", qop=auth, response=\""
+                      << m_hash << "\", opaque=\""
+                      << m_opaque << "\"";
+        headers.insert({ "Authorization", authHdrStream.str() });
         const auto res = m_client.post(
                     url.c_str(),
                     headers,
@@ -151,7 +159,7 @@ public:
             std::cout << "Failed to get valid response" << std::endl;
         }
 
-        return  false;
+        return  result;
     }
 
     void parseAuthInfo( httplib::Response &res ) {
