@@ -27,18 +27,19 @@ inline std::string trim( const std::string &str )
                [](int c) {
        return std::isspace(c);
    }).base();
-   return back <= front ? std::string() : std::string( front, back);
+   return back <= front ? std::string{} : std::string{ front, back };
 }
 
-std::vector< std::string > && split( const std::string &val,
-                                     char delem ) {
-    std::vector< std::string > comps;
-    std::istringstream stream(val);
-    std::string temp;
-    while( std::getline( stream, temp, delem)) {
-        comps.push_back( trim( temp ));
+std::vector< std::string > && split( const std::string &text, char sep ) {
+    std::vector< std::string > tokens;
+    std::size_t start = 0, end = 0;
+    while(( end = text.find( sep, start )) != std::string::npos ) {
+        auto token = text.substr( start, end - start );
+        tokens.emplace_back( trim( token ));
+        start = end + 1;
     }
-    return std::move( comps );
+    tokens.push_back( text.substr( start ));
+    return std::move( tokens );
 }
 
 bool startsWith( const std::string &main, const std::string &check ) {
@@ -51,9 +52,7 @@ bool startsWith( const std::string &main, const std::string &check ) {
     return result;
 }
 
-
-
-std::string && getDigest(std::vector< std::string > &vals) {
+std::string && getDigest( const std::vector< std::string > &vals ) {
     using CryptoPP::Weak::MD5;
     MD5 digester;
     std::stringstream out;
@@ -95,6 +94,14 @@ std::string && removeQuotes( const std::string &in ) {
     return std::move( std::string{} );
 }
 
+void printVector( const std::vector< std::string > &vec ) {
+    std::cout << " -- ";
+    for( const auto &s : vec ) {
+        std::cout << "[" << s << "] ";
+    }
+    std::cout << std::endl;
+}
+
 std::map< std::string, std::string > && authHeaderToMap( const std::string h ) {
     std::map< std::string, std::string > map;
     auto compsOne = split( h, ',' );
@@ -115,11 +122,11 @@ public:
         , m_valid{ false }
         , m_client{ "httpbin.org", 443 }
     {
-        auto res = m_client.get( "/digest-auth/auth/user/password/md5/never");
+        auto res = m_client.get( URI.c_str() );
         if( res != nullptr ) {
             std::cout << "Status: " << res->status<< std::endl;
             std::cout << res->body << std::endl;
-            printHeaders( *res );
+//            printHeaders( *res );
             if( res->status == 401 ) {
                 parseAuthInfo( *res );
                 m_valid = true;
@@ -127,28 +134,54 @@ public:
         }
     }
 
-    bool post( std::string url, std::string content ) const {
+    bool post( const std::string &url, const std::string &content ) {
+        auto result = false;
+        httplib::Headers headers;
+        const auto res = m_client.post(
+                    url.c_str(),
+                    headers,
+                    content,
+                    "text/plain" );
+        if( res != nullptr )  {
+            std::cout << "Result Status: " << res->status << std::endl;
+            std::cout << "Result Body: " << res->body << std::endl;
+            result = ( res->status - 200 ) < 200;
+
+        } else {
+            std::cout << "Failed to get valid response" << std::endl;
+        }
+
         return  false;
     }
 
     void parseAuthInfo( httplib::Response &res ) {
+        // Digest
+        // realm="me@kennethreitz.com",
+        // nonce="9a046325ca9ef842370026fc8ab7ad0a",
+        // qop="auth",
+        // opaque="0c0b7117690cf27a1cb3c3c797dbcfbc",
+        // algorithm=MD5,
+        // stale=FALSE
         auto it = res.headers.find( "Www-Authenticate" );
         if( it != std::end( res.headers )) {
-            auto ah = it->second;
-            if( startsWith( ah, "Digest")) {
-
+            auto fh = it->second;
+            if( startsWith( fh, "Digest")) {
+                auto h = fh.substr( 7 );
+                auto headerMap = authHeaderToMap( h );
+                m_realm = headerMap[ "realm" ];
+                m_nonce = headerMap[ "nonce" ];
+                m_opaque = headerMap[ "opaque" ];
+                auto hash1 = getDigest({ m_userName,  m_realm, m_password });
+                auto hash2 = getDigest({ "POST", URI  });
+                m_hash = getDigest({ hash1, m_nonce, hash2 });
             }
-
-//            Digest realm="me@kennethreitz.com", nonce="9a046325ca9ef842370026fc8ab7ad0a", qop="auth", opaque="0c0b7117690cf27a1cb3c3c797dbcfbc", algorithm=MD5, stale=FALSE
-
         }
-
     }
 
-
-
+    static const std::string URI;
 
 private:
+
     std::string m_userName;
 
     std::string m_password;
@@ -159,11 +192,14 @@ private:
 
     std::string m_realm;
 
-    std::string m_nounce;
+    std::string m_nonce;
 
+    std::string m_opaque;
 
-
+    std::string m_hash;
 };
+const std::string HttpBinRequester::URI =
+        "/digest-auth/auth/user/password/md5/never";
 
 std::string readWiki() {
     httplib::SSLClient cli{"en.wikipedia.org", 443};
@@ -191,13 +227,13 @@ std::string readWiki() {
 int main()
 {
     HttpBinRequester req{ "user", "password" };
-//    auto wiki = readWiki();
-//    if( wiki.size() > 0 ) {
-//        auto r = req.post( "/digest-auth/auth/user/password/md5/never", wiki );
-//        std::cout << ( r ? "Done" : "Failed" ) << std::endl;
-//    } else {
-//        std::cout << "Wiki retrieval failed" << std::endl;
-//    }
+    auto wiki = readWiki();
+    if( wiki.size() > 0 ) {
+        auto r = req.post( HttpBinRequester::URI, wiki );
+        std::cout << ( r ? "Done" : "Failed" ) << std::endl;
+    } else {
+        std::cout << "Wiki retrieval failed" << std::endl;
+    }
 
 }
 
