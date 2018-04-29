@@ -58,31 +58,26 @@ bool startsWith( const std::string &main, const std::string &check ) {
 }
 
 ///@todo - use vector of byte buffer instead of strings
-//std::string getDigest( const std::vector< std::string > &vals ) {
-//    using CryptoPP::Weak::MD5;
-//    MD5 digester;
-//    std::stringstream out;
-//    std::stringstream stream;
-//    byte buffer[ MD5::DIGESTSIZE ];
+std::string getDigest( const std::vector< std::basic_string< byte >> &vals ) {
+    using CryptoPP::Weak::MD5;
+    MD5 digester;
+    std::stringstream out;
+    byte buffer[ MD5::DIGESTSIZE ];
 
-//    for( std::size_t i = 0; i < vals.size(); ++ i ) {
-//        const auto &val = vals[ i ];
-//        stream << val;
-//        if( i < vals.size() - 1 ) {
-//            stream << ":";
-//        }
-//    }
-//    auto hval = stream.str();
-//    digester.CalculateDigest( buffer,
-//                              reinterpret_cast< const byte* >( hval.c_str() ),
-//                              hval.size() );
-//    for( int i = 0; i < MD5::DIGESTSIZE; ++i ) {
-//        out << std::hex << static_cast< uint16_t >( buffer[i] );
-//    }
-//    auto digest = out.str();
-//    std::cout << "CalcDigest: " << hval << " => "  << digest << std::endl;
-//    return digest;
-//}
+    auto fullSize = 0;
+    for( auto &bs : vals ) {
+        fullSize += bs.size();
+    }
+    fullSize += vals.size() - 1; // for ':' chars
+    auto inBuffer = new byte[ fullSize ];
+    delete[] inBuffer;
+    for( int i = 0; i < MD5::DIGESTSIZE; ++i ) {
+        out << std::hex << static_cast< uint16_t >( buffer[i] );
+    }
+    auto digest = out.str();
+    return digest;
+}
+
 std::string getDigest( const std::vector< std::string > &vals ) {
     using CryptoPP::Weak::MD5;
     MD5 digester;
