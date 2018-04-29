@@ -13,6 +13,11 @@
 
 #include "httplib.h"
 
+enum class HttpMethod {
+    GET,
+    POST,
+};
+
 inline std::string trim( const std::string &str )
 {
    auto front = std::find_if_not(
@@ -30,7 +35,7 @@ inline std::string trim( const std::string &str )
    return back <= front ? std::string{} : std::string{ front, back };
 }
 
-std::vector< std::string > && split( const std::string &text, char sep ) {
+std::vector< std::string > split( const std::string &text, char sep ) {
     std::vector< std::string > tokens;
     std::size_t start = 0, end = 0;
     while(( end = text.find( sep, start )) != std::string::npos ) {
@@ -39,7 +44,7 @@ std::vector< std::string > && split( const std::string &text, char sep ) {
         start = end + 1;
     }
     tokens.push_back( text.substr( start ));
-    return std::move( tokens );
+    return tokens;
 }
 
 bool startsWith( const std::string &main, const std::string &check ) {
@@ -52,23 +57,56 @@ bool startsWith( const std::string &main, const std::string &check ) {
     return result;
 }
 
-std::string && getDigest( const std::vector< std::string > &vals ) {
+///@todo - use vector of byte buffer instead of strings
+//std::string getDigest( const std::vector< std::string > &vals ) {
+//    using CryptoPP::Weak::MD5;
+//    MD5 digester;
+//    std::stringstream out;
+//    std::stringstream stream;
+//    byte buffer[ MD5::DIGESTSIZE ];
+
+//    for( std::size_t i = 0; i < vals.size(); ++ i ) {
+//        const auto &val = vals[ i ];
+//        stream << val;
+//        if( i < vals.size() - 1 ) {
+//            stream << ":";
+//        }
+//    }
+//    auto hval = stream.str();
+//    digester.CalculateDigest( buffer,
+//                              reinterpret_cast< const byte* >( hval.c_str() ),
+//                              hval.size() );
+//    for( int i = 0; i < MD5::DIGESTSIZE; ++i ) {
+//        out << std::hex << static_cast< uint16_t >( buffer[i] );
+//    }
+//    auto digest = out.str();
+//    std::cout << "CalcDigest: " << hval << " => "  << digest << std::endl;
+//    return digest;
+//}
+std::string getDigest( const std::vector< std::string > &vals ) {
     using CryptoPP::Weak::MD5;
     MD5 digester;
     std::stringstream out;
+    std::stringstream stream;
     byte buffer[ MD5::DIGESTSIZE ];
+
     for( std::size_t i = 0; i < vals.size(); ++ i ) {
         const auto &val = vals[ i ];
-        digester.Update( reinterpret_cast< const byte* >( val.c_str() ),
-                        val.size() );
+        stream << val;
         if( i < vals.size() - 1 ) {
-            digester.Update( reinterpret_cast< const byte* >( ":" ), 1 );
+            stream << ":";
         }
     }
+    auto hval = stream.str();
+    digester.CalculateDigest( buffer,
+                              reinterpret_cast< const byte* >( hval.c_str() ),
+                              hval.size() );
     for( int i = 0; i < MD5::DIGESTSIZE; ++i ) {
         out << std::hex << static_cast< uint16_t >( buffer[i] );
     }
-    return std::move( out.str() );
+    auto digest = out.str();
+    std::cout << "CalcDigest: " << hval << " => "  << digest << std::endl;
+    return digest;
 }
 
 void printHeaders( httplib::Response &res ) {
@@ -79,19 +117,19 @@ void printHeaders( httplib::Response &res ) {
     }
 }
 
-std::string && removeQuotes( const std::string &in ) {
+std::string removeQuotes( const std::string &in ) {
     if( in.size() > 2 ) {
         auto first = std::begin( in );
-        auto last = std::end( in ) - 1;
+        auto last = std::end( in );
         if( *first == '"' ) {
             first ++;
         }
-        if( *last == '"' ) {
-            last ++;
+        if( *( last - 1 ) == '"' ) {
+            last --;
         }
-        return std::move( std::string{ first, last });
+        return std::string{ first, last };
     }
-    return std::move( std::string{} );
+    return std::string{};
 }
 
 void printVector( const std::vector< std::string > &vec ) {
@@ -102,16 +140,16 @@ void printVector( const std::vector< std::string > &vec ) {
     std::cout << std::endl;
 }
 
-std::map< std::string, std::string > && authHeaderToMap( const std::string h ) {
+std::map< std::string, std::string > authHeaderToMap( const std::string h ) {
     std::map< std::string, std::string > map;
     auto compsOne = split( h, ',' );
-    for( const auto &c : compsOne ) {
+    for( const auto &c :  compsOne ) {
         auto compsTwo = split( c,  '=' );
         if( compsTwo.size() == 2 ) {
             map[ compsTwo[ 0 ]] = removeQuotes( compsTwo[ 1 ]);
         }
     }
-    return  std::move( map );
+    return map;
 }
 
 class HttpBinRequester {
@@ -119,46 +157,73 @@ public:
     HttpBinRequester(const std::string &userName, const std::string &password)
         : m_userName{ userName }
         , m_password{ password }
+        , m_nonceCount{ "1" }
+        , m_cnonce{ "fg4ghe" }
         , m_valid{ false }
         , m_client{ "httpbin.org", 443 }
+
     {
+        httplib::Headers headers;
+        headers.insert({ "Set-Cookie", "fake=fake_value" });
         auto res = m_client.get( URI.c_str() );
         if( res != nullptr ) {
-            std::cout << "Status: " << res->status<< std::endl;
+            std::cout << "Result Status: " << res->status<< std::endl;
             std::cout << res->body << std::endl;
-//            printHeaders( *res );
             if( res->status == 401 ) {
+                printHeaders( *res );
+                std::cout << " - - - - - - - - - - -" << std::endl;
                 parseAuthInfo( *res );
                 m_valid = true;
             }
         }
     }
 
-    bool post( const std::string &url, const std::string &content ) {
-        auto result = false;
-        httplib::Headers headers;
+    void addAuthHeaders( const std::string &response,
+                         httplib::Headers &headersOut ) {
         std::stringstream authHdrStream;
         authHdrStream << "Digest username=\"" << m_userName << "\", realm=\""
                       << m_realm << "\", nonce=\""
                       << m_nonce << "\", uri=\""
-                      << URI << "\", qop=auth, response=\""
-                      << m_hash << "\", opaque=\""
+                      << URI << "\", qop=auth, "
+                      << "nc=" << m_nonceCount << ", "
+                      << "cnonce=\"" << m_cnonce << "\", "
+                      << "response=\""
+                      << response << "\", opaque=\""
                       << m_opaque << "\"";
-        headers.insert({ "Authorization", authHdrStream.str() });
-        const auto res = m_client.post(
-                    url.c_str(),
-                    headers,
-                    content,
-                    "text/plain" );
+        auto val = authHdrStream.str();
+        std::cout << "Auth Header: " << val << std::endl;
+        headersOut.insert({ "Authorization",  val });
+        headersOut.insert({ "Set-Cookie", "fake=fake_value" });
+    }
+
+    bool request(  HttpMethod method,
+                   const std::string &url,
+                   const std::string &content ) {
+        auto result = false;
+        httplib::Headers headers;
+        std::shared_ptr< httplib::Response > res;
+        switch ( method ) {
+        case HttpMethod::GET: {
+            addAuthHeaders( m_postHash, headers );
+            res = m_client.get( url.c_str(), headers );
+            break;
+        }
+        case HttpMethod::POST: {
+            addAuthHeaders( m_postHash, headers );
+            res = m_client.post( url.c_str(), headers, content, "text/plain" );
+            break;
+        }
+
+        }
         if( res != nullptr )  {
             std::cout << "Result Status: " << res->status << std::endl;
             std::cout << "Result Body: " << res->body << std::endl;
             result = ( res->status - 200 ) < 200;
+            printHeaders( *res );
 
         } else {
             std::cout << "Failed to get valid response" << std::endl;
         }
-
         return  result;
     }
 
@@ -180,8 +245,14 @@ public:
                 m_nonce = headerMap[ "nonce" ];
                 m_opaque = headerMap[ "opaque" ];
                 auto hash1 = getDigest({ m_userName,  m_realm, m_password });
-                auto hash2 = getDigest({ "POST", URI  });
-                m_hash = getDigest({ hash1, m_nonce, hash2 });
+                auto pHash = getDigest({ "POST", URI  });
+                auto gHash = getDigest({ "GET", URI  });
+                m_postHash = getDigest({ hash1,
+                                         m_nonceCount,
+                                         m_cnonce,
+                                         m_nonce,
+                                         pHash });
+                m_getHash  = getDigest({ hash1, m_nonce, gHash });
             }
         }
     }
@@ -194,6 +265,10 @@ private:
 
     std::string m_password;
 
+    std::string m_nonceCount;
+
+    std::string m_cnonce;
+
     bool m_valid;
 
     httplib::SSLClient m_client;
@@ -204,8 +279,11 @@ private:
 
     std::string m_opaque;
 
-    std::string m_hash;
+    std::string m_postHash;
+
+    std::string m_getHash;
 };
+
 const std::string HttpBinRequester::URI =
         "/digest-auth/auth/user/password/md5/never";
 
@@ -216,9 +294,8 @@ std::string readWiki() {
     auto res = cli.get("/wiki/JUCE", nullptr);
     if (res && res->status == 200) {
         if(res) {
-            std::cout << "Status Code: "
-                      << res->status << std::endl
-                      << res->body;
+            std::cout << "Wiki Read - Status Code: "
+                      << res->status << std::endl;
         } else {
             std::cout << "Write failed without status code" << std::endl;
         }
@@ -237,7 +314,7 @@ int main()
     HttpBinRequester req{ "user", "password" };
     auto wiki = readWiki();
     if( wiki.size() > 0 ) {
-        auto r = req.post( HttpBinRequester::URI, wiki );
+        auto r = req.request( HttpMethod::GET, HttpBinRequester::URI, wiki );
         std::cout << ( r ? "Done" : "Failed" ) << std::endl;
     } else {
         std::cout << "Wiki retrieval failed" << std::endl;
