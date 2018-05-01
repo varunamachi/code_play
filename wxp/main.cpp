@@ -110,29 +110,23 @@ bool startsWith( const std::string &main, const std::string &check ) {
     return result;
 }
 
-std::array< byte, 16 > getDigest( const std::vector< ByteArray > &vals ) {
+std::string getDigest( const std::vector< std::string > &vals ) {
     using CryptoPP::Weak::MD5;
     MD5 digester;
     std::array< byte, MD5::DIGESTSIZE > buffer;
-
-    std::size_t fullSize = 0;
-    for( auto &bs : vals ) {
-        fullSize += bs.size();
-    }
-    fullSize += vals.size() - 1; // for ':' chars
-    auto inBuffer = new byte[ fullSize ];
-    auto index = 0;
-    for( std::size_t i = 0;  i < vals.size(); ++ i ) {
-        auto &s = vals[ i ];
-        std::memcpy( &inBuffer[ index ], s.data(), s.size() );
-        index += s.size();
+    std::stringstream stream;
+    for( std::size_t i = 0; i < vals.size(); ++ i ) {
+        stream << vals[ i ];
         if( i < vals.size() - 1 ) {
-            inBuffer[ index ++ ] = ':';
+            stream << ":";
         }
     }
-    digester.CalculateDigest( buffer.data(), inBuffer, fullSize );
-    delete[] inBuffer;
-    return buffer;
+    auto b = stream.str();
+    digester.CalculateDigest( buffer.data(), tb( b.c_str() ), b.size() );
+
+    std::stringstream out;
+    out << buffer;
+    return out.str();
 }
 
 void printHeaders( httplib::Response &res ) {
@@ -217,8 +211,8 @@ public:
     HttpBinRequester(const std::string &userName, const std::string &password)
         : m_userName{ userName }
         , m_password{ password }
-        , m_nonceCount{ 1 }
-        , m_cnonce{ "fg4ghe" }
+        , m_nonceCount{ "00000001" }
+        , m_cnonce{ "09d2184b6c419cb0" }
         , m_valid{ false }
         , m_client{ "eu.httpbin.org", 443 }
 
@@ -238,24 +232,34 @@ public:
         }
     }
 
-    void addAuthHeaders( const std::array< byte, 16 > &response,
+    void addAuthHeaders( const std::string &response,
                          httplib::Headers &headersOut ) {
         std::stringstream authHdrStream;
         authHdrStream << "Digest username=\"" << m_userName << "\", realm=\""
                       << m_realm << "\", nonce=\""
-                      << m_nonce << "\", uri=\""
-                      << URI << "\", qop=\"auth\", "
-                      << "nc=" << m_nonceCount << ", "
-                      << "cnonce=\"" << m_cnonce << "\", "
-                      << "response=\""
-                      << response << "\", opaque=\""
-                      << m_opaque << "\"";
+                      << m_nonce << "\", uri=\"" << URI
+                      << "\", qop=auth, " << " nc=" << m_nonceCount << ", "
+                      << "cnonce=\"" << m_cnonce << "\" ,"
+                      << "response=\"" << response
+                      << "\",opaque=\"" << m_opaque
+                      << "\", algorithm=MD5";
         auto val = authHdrStream.str();
         std::cout << "\n ======== " << std::endl;
         std::cout << "Auth Header: " << val << std::endl;
         std::cout << " ======== \n" << std::endl;
         headersOut.insert({ "Authorization",  val });
-        headersOut.insert({ "Set-Cookie", "fake=fake_value" });
+        headersOut.insert({ "User-Agent",
+                            "Mozilla/5.0 (X11; Linux x86_64)"
+                            " AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/66.0.3359.139 Safari/537.36" });
+        headersOut.insert({ "Cookie", "_gauges_unique_hour=1; "
+                            "_gauges_unique_day=1; "
+                            "_gauges_unique_month=1; "
+                            "_gauges_unique_year=1; "
+                            "_gauges_unique=1; "
+                            "stale_after=never; "
+                            "fake=fake_value" });
+
     }
 
     bool request(  HttpMethod method,
@@ -310,54 +314,45 @@ public:
                 auto h = fh.substr( 7 );
                 auto headerMap = authHeaderToMap( h );
                 m_realm = headerMap[ "realm" ];
-                if( hexToBytes( headerMap[ "nonce" ], m_nonce.data() ) &&
-                        hexToBytes( headerMap[ "opaque" ], m_opaque.data() )) {
-                    auto hash1 = getDigest({ toBA( m_userName ),
-                                             toBA( m_realm ),
-                                             toBA( m_password )});
-                    std::cout << "HASH1: " << hash1 << std::endl;
+                m_nonce = headerMap[ "nonce" ];
+                m_opaque = headerMap[ "opaque" ];
+                auto hash1 = getDigest({ m_userName, m_realm, m_password });
+                std::cout << "HASH1: " << hash1 << std::endl;
+                auto pHash = getDigest({ "POST", URI });
+                std::cout << "P HASH: " << pHash << std::endl;
 
-                    auto pHash = getDigest({ toBA( std::string{ "POST" }),
-                                             toBA( URI )});
-                    std::cout << "P HASH: " << pHash << std::endl;
+                auto gHash = getDigest({ "GET", URI });
+                std::cout << "G HASH: " << gHash << std::endl;
 
-                    auto gHash = getDigest({ toBA( std::string{ "GET" }),
-                                             toBA( URI )});
-                    std::cout << "G HASH: " << gHash << std::endl;
-
-                    m_postHash = getDigest({ toBA( hash1 ),
-                                             toBA( m_nonce ),
-                                             ByteArray{ &m_nonceCount, 1},
-                                             toBA( m_cnonce ),
-                                             toBA( "auth" ),
-                                             toBA( pHash )});
-                    std::cout << "POST R: " << m_postHash << std::endl;
+                m_postHash = getDigest({ hash1,
+                                         m_nonce,
+                                         "1",
+                                         m_cnonce,
+                                         "auth",
+                                         pHash });
+                std::cout << "POST R: " << m_postHash << std::endl;
 
 
-                    std::cout << hash1
-                              << ":"
-                              << m_nonce
-                              << ":"
-                              << 1 << ":"
-                              << m_cnonce << ":"
-                              << "auth:"
-                              << gHash
-                              << "\n";
+                std::cout << hash1
+                          << ":"
+                          << m_nonce
+                          << ":"
+                          << m_nonceCount << ":"
+                          << m_cnonce << ":"
+                          << "auth:"
+                          << gHash
+                          << "\n";
 
-                    m_getHash  = getDigest({ toBA( hash1 ),
-                                             toBA( m_nonce ),
-                                             ByteArray{ &m_nonceCount, 1},
-                                             toBA( m_cnonce ),
-                                             toBA( "auth" ),
-                                             toBA( gHash )
-                                           });
-                    std::cout << "GET R: " << m_getHash << std::endl;
-                    result = true;
-                }
-                else {
-                    std::cout << "Invalid auth info given by server"
-                              << std::endl;
-                }
+
+                m_getHash  = getDigest({ hash1,
+                                         m_nonce,
+                                         m_nonceCount,
+                                         m_cnonce,
+                                         "auth",
+                                         gHash
+                                       });
+                std::cout << "GET R: " << m_getHash << std::endl;
+                result = true;
             }
         }
         return result;
@@ -371,7 +366,7 @@ private:
 
     std::string m_password;
 
-    byte  m_nonceCount;
+    std::string  m_nonceCount;
 
     std::string m_cnonce;
 
@@ -381,13 +376,13 @@ private:
 
     std::string m_realm;
 
-    std::array< byte, 16 > m_nonce;
+    std::string m_nonce;
 
-    std::array< byte, 16 > m_opaque;
+    std::string m_opaque;
 
-    std::array< byte, 16 > m_postHash;
+    std::string m_postHash;
 
-    std::array< byte, 16 > m_getHash;
+    std::string m_getHash;
 };
 
 const std::string HttpBinRequester::URI =
@@ -426,6 +421,13 @@ int main()
     } else {
         std::cout << "Wiki retrieval failed" << std::endl;
     }
+//    std::cout << "-->" << getDigest({ "4de666b60f91e2444f549243bed5fa4b",
+//                                      "0d89b15f2c05cc3c9eb7f8226dcab08c",
+//                                      "00000003",
+//                                      "c0829ac1f269b679",
+//                                      "auth",
+//                                      "c1f56c5bf8c45a5de6e4e311bc6ec003",
+//                                    }) << '\n';
 
 }
 
