@@ -34,11 +34,23 @@ std::string format(const LogMessage &msg) {
 }
 
 enum class Severity {
-
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Special
 };
 
 struct LogMessage {
-
+    time_t m_time;
+    Severity m_severity;
+    std::thread::id m_threadID;
+    int m_line;
+    std::string m_module;
+    std::string m_method;
+    std::string m_file;
+    std::string m_logMsg;
 };
 
 class AbstractSync {
@@ -146,7 +158,7 @@ public:
             {
                 empty = m_queue.empty();
                 if (!empty) {
-                    std::lock_guard lock(m_mutex);
+                    std::lock_guard<std::mutex> lock(m_mutex);
                     msg = std::move(m_queue.back());
                     m_queue.pop();
                     empty = m_queue.empty();
