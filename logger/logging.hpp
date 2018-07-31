@@ -8,6 +8,7 @@
 #include <mutex>
 #include <vector>
 #include <queue>
+#include <iostream>
 
 #if defined _WIN32
     #define V_WINDOWS
@@ -33,6 +34,7 @@ std::string format(const LogMessage &msg) {
     return "";
 }
 
+//############### <Severity> ####################
 enum class Severity {
     Trace,
     Debug,
@@ -41,7 +43,31 @@ enum class Severity {
     Error,
     Special
 };
+inline const std::string & toString(Severity sev) {
+    static const std::string TRACE("[ TRACE ]");
+    static const std::string DEBUG("[ DEBUG ]");
+    static const std::string INFO("[ INFO  ]");
+    static const std::string WARN("[ WARNG ]");
+    static const std::string ERROR("[ ERROR ]");
+    static const std::string SPECIAL("[ ***** ]");
+    switch(sev) {
+        case Severity::Trace  : return TRACE;
+        case Severity::Debug  : return DEBUG;
+        case Severity::Info   : return INFO;
+        case Severity::Warn   : return WARN;
+        case Severity::Error  : return ERROR;
+        case Severity::Special: return SPECIAL;
+    }
+    return SPECIAL;
+}
+std::ostream & operator << (std::ostream &stream, Severity severity) {
+    stream << toString(severity);
+    return stream;
+}
+//############### </Severity> ####################
 
+
+//############### <LogMessage> ####################
 struct LogMessage {
     time_t m_time;
     Severity m_severity;
@@ -52,7 +78,11 @@ struct LogMessage {
     std::string m_file;
     std::string m_logMsg;
 };
+//############### </LogMessage> ####################
 
+
+
+//############### <AbstractSync> ####################
 class AbstractSync {
 public:
     explicit AbstractSync(const std::string &id) : m_id(id) { }
@@ -67,7 +97,10 @@ private:
     std::string m_id;
 };
 AbstractSync::~AbstractSync() { }
+//############### </AbstractSync> ####################
 
+
+//############### <SyncEntry> ####################
 struct SyncEntry {
     Filter m_filter;
     bool m_enabled;
@@ -77,7 +110,9 @@ struct SyncEntry {
         return this->m_sync->id() == se.m_sync->id();
     }
 };
+//############### </SyncEntry> ####################
 
+//############### <Logger> ####################
 class Logger {
 private:
     auto findEntry(const std::string &id) {
@@ -227,21 +262,49 @@ private:
     bool m_running;
     static std::unique_ptr<Logger> s_instance;
 };
+//############### </Logger> ####################
 
+
+//############### <ConsoleSync> ####################
 class ConsoleSync : public AbstractSync {
+public:
+    ConsoleSync() : AbstractSync("inbuilt.console") {}
+
 public: // for AbstractSync
     void write(const LogMessage &msg, const std::string &formated);
-
-private:
 };
 
+void ConsoleSync::write(const LogMessage &msg, const std::string &formated) {
+    if (msg.m_severity >= Severity::Warn) {
+        std::cerr << formated << '\n';
+    } else {
+        std::cout << formated << '\n';
+    }
+}
+//############### </ConsoleSync> ####################
 
+
+//############### <FileSync> ####################
 class FileSync : public AbstractSync {
+public:
+    explicit FileSync(const std::string &fileNamePrefix)
+        : AbstractSync("inbuilt.file")
+        , m_fileNamePrefix(fileNamePrefix) { }
+
 public: // for AbstractSync
     void write(const LogMessage &msg, const std::string &formated);
 
 private:
+    std::string m_fileNamePrefix;
+
 };
+
+void FileSync::write(const LogMessage &/*msg*/,
+                     const std::string &/*formated*/) {
+
+}
+//############### </FileSync> ####################
+
 
 #ifdef V_LOGGER_IMPL
     const Logger* Logger::s_insance = nullptr;
