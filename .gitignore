@@ -1,4 +1,5 @@
 *.pro.user 
 build-*/
 *.autosave
-CMakeList.txt.user
+*/CMakeLists.txt.user
+CMakeListis.txt.user

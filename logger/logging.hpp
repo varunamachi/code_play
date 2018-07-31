@@ -228,6 +228,20 @@ private:
     static std::unique_ptr<Logger> s_instance;
 };
 
+class ConsoleSync : public AbstractSync {
+public: // for AbstractSync
+    void write(const LogMessage &msg, const std::string &formated);
+
+private:
+};
+
+
+class FileSync : public AbstractSync {
+public: // for AbstractSync
+    void write(const LogMessage &msg, const std::string &formated);
+
+private:
+};
 
 #ifdef V_LOGGER_IMPL
     const Logger* Logger::s_insance = nullptr;
