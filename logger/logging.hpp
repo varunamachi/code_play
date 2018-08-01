@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fstream>
 #include <functional>
 #include <unordered_map>
 #include <memory>
@@ -287,9 +288,13 @@ void ConsoleSync::write(const LogMessage &msg, const std::string &formated) {
 //############### <FileSync> ####################
 class FileSync : public AbstractSync {
 public:
-    explicit FileSync(const std::string &fileNamePrefix)
+    explicit FileSync(
+            const std::string &logDirPath,
+            const std::string &fileNamePrefix)
         : AbstractSync("inbuilt.file")
-        , m_fileNamePrefix(fileNamePrefix) { }
+        , m_fileNamePrefix(fileNamePrefix)
+        , m_logDir(logDirPath)
+        , m_valid(false){ }
 
 public: // for AbstractSync
     void write(const LogMessage &msg, const std::string &formated);
@@ -297,11 +302,20 @@ public: // for AbstractSync
 private:
     std::string m_fileNamePrefix;
 
+    std::string m_logDir;
+
+    std::ofstream m_stream;
+
+    bool m_valid;
 };
 
 void FileSync::write(const LogMessage &/*msg*/,
-                     const std::string &/*formated*/) {
-
+                     const std::string &formated) {
+    if (!m_valid) {
+        auto fpath = m_logDir + "/" + m_fileNamePrefix + ".log";
+        m_stream = std::ofstream(fpath);
+    }
+    m_stream << formated << '\n';
 }
 //############### </FileSync> ####################
 
