@@ -10,6 +10,7 @@
 #include <vector>
 #include <queue>
 #include <iostream>
+#include <sstream>
 
 #if defined _WIN32
     #define V_WINDOWS
@@ -24,6 +25,8 @@
     #define V_MAC_OS
     #define V_POSIX
 #endif
+
+namespace DVoid { //dense_void!
 
 struct LogMessage;
 using Filter = std::function<bool(LogMessage &)>;
@@ -88,9 +91,9 @@ class AbstractSync {
 public:
     explicit AbstractSync(const std::string &id) : m_id(id) { }
 
-    virtual void write(const LogMessage &msg, const std::string &formated) = 0;
-
     const std::string & id() const { return m_id; }
+
+    virtual void write(const LogMessage &msg, const std::string &formated) = 0;
 
     virtual ~AbstractSync();
 
@@ -152,7 +155,7 @@ public:
         }
     }
 
-    static Logger & instance() {
+    static Logger & get() {
         if (!static_cast<bool>(s_instance)) {
             s_instance = std::make_unique<Logger>(Type::Direct);
         }
@@ -240,6 +243,14 @@ public:
         return addFilter(id, nullptr);
     }
 
+    void setSeverityLevel(Severity sev) {
+        m_severity = sev;
+    }
+
+    Severity severityLevel() const {
+        return  m_severity;
+    }
+
 
 private:
     void writeDirect(LogMessage &msg) {
@@ -256,11 +267,19 @@ private:
 
 private:
     Type m_type;
+
+    Severity m_severity;
+
     std::vector<SyncEntry> m_syncs;
+
     Formatter m_formatter;
+
     std::mutex m_mutex;
+
     MsgQueue m_queue;
+
     bool m_running;
+
     static std::unique_ptr<Logger> s_instance;
 };
 //############### </Logger> ####################
@@ -320,6 +339,132 @@ void FileSync::write(const LogMessage &/*msg*/,
 //############### </FileSync> ####################
 
 
-#ifdef V_LOGGER_IMPL
-    const Logger* Logger::s_insance = nullptr;
+
+class LogLineHolder
+{
+public:
+    typedef std::ostream & ( Manip )( std::ostream & );
+
+    LogLineHolder( Logger *logger, LogMessage *msg )
+        : m_msg( msg )
+        , m_logger( logger )
+        , m_level( Logger::get().severityLevel() )
+    {
+
+    }
+
+    template< typename T >
+    LogLineHolder & operator<<( const T &obj )
+    {
+        if( m_msg->m_severity >= m_level ) {
+            m_stream << obj;
+        }
+        return *this;
+    }
+
+    template< typename T >
+    LogLineHolder & operator<<( T &&obj )
+    {
+        if( m_msg->m_severity >= m_level ) {
+            m_stream << obj;
+        }
+        return *this;
+    }
+
+    LogLineHolder & operator << ( Manip &manip )
+    {
+        if( m_msg->m_severity >= m_level ) {
+            m_stream << manip;
+        }
+        return *this;
+    }
+
+    ~LogLineHolder()
+    {
+        if( m_msg->m_severity >= m_level ) {
+            m_stream.flush();
+            if( m_logger != nullptr ) {
+                m_msg->m_logMsg = m_stream.str(); //copy ellided
+                m_logger->write( std::move(m_msg));
+            }
+        }
+    }
+
+private:
+    std::unique_ptr<LogMessage> m_msg;
+
+    Logger *m_logger;
+
+    std::ostringstream m_stream;
+
+    Severity m_level;
+};
+
+}
+
+
+
+#define DV_LOGGER() DVoid::Logger::get()
+
+#ifndef __FUNCTION_NAME__
+    #ifdef _MSC_VER //VC++
+        #define FUNCTION_NAME  __FUNCSIG__
+    #else          //Other
+        #define FUNCTION_NAME   __PRETTY_FUNCTION__
+    #endif
+#endif
+
+
+//time_t m_time;
+//Severity m_severity;
+//std::thread::id m_threadID;
+//int m_line;
+//std::string m_module;
+//std::string m_method;
+//std::string m_file;
+//std::string m_logMsg;
+
+#ifndef DV_DISABLE_DEFAULT_LOGGING
+        #define DV_COMMON( level, mod )                                       \
+            Quartz::Logger::LogLineHolder(                                    \
+                DVoid::Logger::::get(),                                       \
+                    new DVoid::LogMessage{            \
+                        std::time(0),                 \
+                        level,                        \
+                        std::this_thread::get_id(),   \
+                        __LINE__,                     \
+                        mod,                          \
+                        FUNCTION_NAME,                \
+                        __FILE__                      \
+                    }
+        #define DV_TRACE( module ) \
+            DV_COMMON( DVoid::Severity::Trace, module )
+
+        #define DV_DEBUG( module ) \
+            DV_COMMON( DVoid::Severity::Debug, module )
+
+        #define DV_INFO( module ) \
+            DV_COMMON( DVoid::Severity::Info, module )
+
+        #define DV_WARN( module ) \
+            DV_COMMON( DVoid::Severity::Warn, module )
+
+        #define DV_ERROR( module ) \
+            DV_COMMON( DVoid::Severity::Error, module )
+
+        #define DV_SPECIAL( module ) \
+            DV_COMMON( DVoid::Severity::Special, module )
+#else
+    #define DV_COMMON( level, mod, message )
+    #define DV_TRACE( module )
+    #define DV_DEBUG( module )
+    #define DV_INFO( module )
+    #define DV_WARN( module )
+    #define DV_ERROR( module )
+    #define DV_SPECIAL( module )
+#endif
+
+
+#ifdef DV_LOGGER_IMPL
+    const DVoid::Logger* DVoid::Logger::s_insance = nullptr;
 #endif
